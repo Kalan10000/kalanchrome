@@ -19,16 +19,59 @@ function isBlockedHost(hostname: string): boolean {
 }
 
 function buildProxyBridgeScript(finalUrl: string): string {
+  const parsed = new URL(finalUrl);
+  const virtualPath = (parsed.pathname || '/') + parsed.search + parsed.hash;
+  const targetOrigin = parsed.origin;
+
   return `
 <script>
 (function() {
+  var targetOrigin = ${JSON.stringify(targetOrigin)};
+  var initialPath = ${JSON.stringify(virtualPath)};
+
+  function toSameOriginUrl(urlArg) {
+    if (urlArg === undefined || urlArg === null) return urlArg;
+    try {
+      var str = String(urlArg);
+      var resolved = new URL(str, targetOrigin);
+      if (resolved.origin === targetOrigin || resolved.origin === window.location.origin) {
+        return window.location.origin + resolved.pathname + resolved.search + resolved.hash;
+      }
+    } catch (e) {}
+    return window.location.origin + initialPath;
+  }
+
   try {
-    window.parent.postMessage({
-      type: 'CHROME_PAGE_LOADED',
-      url: ${JSON.stringify(finalUrl)},
-      title: document.title || ${JSON.stringify(new URL(finalUrl).hostname)}
-    }, '*');
+    var origPush = history.pushState.bind(history);
+    var origReplace = history.replaceState.bind(history);
+
+    origReplace(null, '', window.location.origin + initialPath);
+
+    history.pushState = function(state, unused, url) {
+      var mapped = toSameOriginUrl(url);
+      var out = origPush(state, unused, mapped);
+      try {
+        var newTarget = targetOrigin + window.location.pathname + window.location.search + window.location.hash;
+        window.parent.postMessage({ type: 'CHROME_PAGE_LOADED', url: newTarget, title: document.title }, '*');
+      } catch (e) {}
+      return out;
+    };
+
+    history.replaceState = function(state, unused, url) {
+      var mapped = toSameOriginUrl(url);
+      return origReplace(state, unused, mapped);
+    };
   } catch (e) {}
+
+  window.addEventListener('DOMContentLoaded', function() {
+    try {
+      window.parent.postMessage({
+        type: 'CHROME_PAGE_LOADED',
+        url: ${JSON.stringify(finalUrl)},
+        title: document.title || ${JSON.stringify(parsed.hostname)}
+      }, '*');
+    } catch (e) {}
+  });
 
   document.addEventListener('click', function(e) {
     var anchor = e.target && e.target.closest ? e.target.closest('a[href]') : null;
@@ -224,10 +267,9 @@ export default async function proxyHandler(
       ''
     );
 
-    const baseAndBridge = `<base href="${originBase.replace(
-      /"/g,
-      '&quot;'
-    )}" />${buildProxyBridgeScript(finalUrl)}`;
+    const baseAndBridge = `${buildProxyBridgeScript(
+      finalUrl
+    )}<base href="${originBase.replace(/"/g, '&quot;')}" />`;
 
     if (/<head[^>]*>/i.test(html)) {
       html = html.replace(/<head([^>]*)>/i, `<head$1>${baseAndBridge}`);
