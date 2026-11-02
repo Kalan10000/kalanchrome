@@ -1,0 +1,6 @@
+{
+  "name": "Studio Chrome — Monitor & Responsive Browser Emulator",
+  "description": "An interactive Google Chrome browser emulator housed inside a studio monitor with live web search, website browsing, multi-tab navigation, and real-time responsive viewport resizing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
